@@ -1,0 +1,11 @@
+
+{
+  "name": "HabitSnap",
+  "short_name": "HabitSnap",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "description": "Track your habits visually with daily photos.",
+  "theme_color": "#4CAF50",
+  "icons": []
+}

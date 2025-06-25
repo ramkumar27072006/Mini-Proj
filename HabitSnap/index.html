@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0d1b2a" />
+  <title>📸 HabitSnap</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0d1b2a; /* Rich royal blue background */
+      margin: 0;
+      padding: 20px;
+      color: #ffffff;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: auto;
+      background: #1b263b;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+      animation: fadeIn 0.5s ease;
+    }
+
+    h1 {
+      color: #00b4d8;
+      text-align: center;
+    }
+
+    form {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    input, button {
+      padding: 12px;
+      font-size: 16px;
+      border-radius: 8px;
+      border: none;
+    }
+
+    input {
+      background: #edf6f9;
+      color: #000;
+    }
+
+    button {
+      background-color: #00b4d8;
+      color: white;
+      cursor: pointer;
+      border: none;
+    }
+
+    button:hover {
+      background-color: #0077b6;
+    }
+
+    summary {
+      cursor: pointer;
+      font-weight: bold;
+      margin: 10px 0;
+      color: #caf0f8;
+    }
+
+    .entry {
+      background: #415a77;
+      padding: 10px;
+      border-radius: 8px;
+      margin: 8px 0;
+      transition: transform 0.3s ease;
+    }
+
+    .entry img {
+      max-width: 100px;
+      border-radius: 8px;
+      display: block;
+      margin: 8px 0;
+    }
+
+    .entry:hover {
+      transform: translateX(5px);
+    }
+
+    .delete-btn {
+      background: #ef233c;
+      color: white;
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      float: right;
+      border: none;
+    }
+
+    #view-all {
+      margin-top: 10px;
+      padding: 10px;
+      background-color: #007f5f;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    #view-all:hover {
+      background-color: #2b9348;
+    }
+
+    @keyframes fadeIn {
+      from {opacity: 0; transform: translateY(20px);}
+      to {opacity: 1; transform: translateY(0);}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📸 HabitSnap</h1>
+
+    <form id="habit-form">
+      <input type="text" id="habit-input" placeholder="Enter your habit..." required />
+      <input type="file" id="habit-photo" accept="image/*" />
+      <button type="submit">Add Entry</button>
+    </form>
+
+    <button id="view-all">📂 View All Entries (Chronological)</button>
+    <div id="all-entries-modal" style="display:none; background:#1e3a5f; padding:10px; margin-top:10px; border-radius:10px;"></div>
+
+    <div id="month-sections"></div>
+  </div>
+
+  <script>
+    const form = document.getElementById('habit-form');
+    const input = document.getElementById('habit-input');
+    const photo = document.getElementById('habit-photo');
+    const sectionContainer = document.getElementById('month-sections');
+    const viewAllBtn = document.getElementById('view-all');
+    const modal = document.getElementById('all-entries-modal');
+
+    let habits = JSON.parse(localStorage.getItem('habits') || '[]');
+
+    function groupByMonth(entries) {
+      return entries.reduce((acc, entry) => {
+        const date = new Date(entry.date);
+        if (isNaN(date.getTime())) return acc; // Skip invalid dates
+        const key = `${date.toLocaleString('default', { month: 'long' })} ${date.getFullYear()}`;
+        acc[key] = acc[key] || [];
+        acc[key].push(entry);
+        return acc;
+      }, {});
+    }
+
+    function render() {
+      sectionContainer.innerHTML = '';
+      const grouped = groupByMonth(habits);
+      for (const [month, entries] of Object.entries(grouped)) {
+        const section = document.createElement('details');
+        section.innerHTML = `<summary>📅 ${month}</summary>`;
+        entries.forEach(entry => {
+          const item = document.createElement('div');
+          item.className = 'entry';
+          const readableDate = new Date(entry.date).toLocaleString();
+          item.innerHTML = `
+            <p><b>${readableDate}</b><br>${entry.text}</p>
+            ${entry.photo ? `<img src="${entry.photo}" alt="proof" />` : ''}
+            <button class="delete-btn" onclick="deleteEntry('${entry.date}')">Delete</button>
+          `;
+          section.appendChild(item);
+        });
+        sectionContainer.appendChild(section);
+      }
+    }
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const file = photo.files[0];
+
+      const saveEntry = (photoData = '') => {
+        const entry = {
+          text: input.value,
+          date: new Date().toISOString(),
+          photo: photoData
+        };
+        habits.push(entry);
+        localStorage.setItem('habits', JSON.stringify(habits));
+        input.value = '';
+        photo.value = '';
+        render();
+      };
+
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+          saveEntry(event.target.result);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        saveEntry();
+      }
+    });
+
+    function deleteEntry(date) {
+      if (!confirm("Delete this entry?")) return;
+      habits = habits.filter(e => e.date !== date);
+      localStorage.setItem('habits', JSON.stringify(habits));
+      render();
+    }
+
+    viewAllBtn.onclick = () => {
+      modal.style.display = modal.style.display === 'none' ? 'block' : 'none';
+      modal.innerHTML = habits
+        .filter(e => !isNaN(new Date(e.date).getTime()))
+        .sort((a, b) => new Date(b.date) - new Date(a.date))
+        .map(entry => `
+          <p><b>${new Date(entry.date).toLocaleString()}</b> - ${entry.text}</p>
+          ${entry.photo ? `<img src="${entry.photo}" style="max-width: 80px; margin-bottom:10px;" />` : ''}
+          <hr>
+        `).join('');
+    };
+
+    render();
+  </script>
+</body>
+</html>
