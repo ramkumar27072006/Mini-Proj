@@ -27,14 +27,30 @@ if not firebase_admin._apps:
 db = firestore.client()
 bucket = storage.bucket()
 
-# ----------------- Page Theme -----------------
+# ----------------- UI Setup -----------------
 st.set_page_config(page_title="📸 HabitSnap | Tracker + Admin", layout="wide")
 
 theme = st.sidebar.selectbox("🎨 Select Theme", ["Light", "Dark"])
-if theme == "Dark":
-    st.markdown("<style>body, .stApp { background-color: #000000; color: white; }</style>", unsafe_allow_html=True)
-else:
-    st.markdown("<style>body, .stApp { background-color: #ffffff; color: black; }</style>", unsafe_allow_html=True)
+
+LIGHT_STYLE = '''
+<style>
+body, .stApp { background-color: #ffffff; color: #000000; }
+.stTextInput>div>div>input, .stTextArea textarea, .stSelectbox>div { background-color: #f0f0f0; color: black; }
+button { background-color: #007BFF; color: white; }
+img { border-radius: 8px; }
+</style>
+'''
+
+DARK_STYLE = '''
+<style>
+body, .stApp { background-color: #0d1117; color: #ffffff; }
+.stTextInput>div>div>input, .stTextArea textarea, .stSelectbox>div { background-color: #22272e; color: white; }
+button { background-color: #1f6feb; color: white; }
+img { border-radius: 8px; }
+</style>
+'''
+
+st.markdown(DARK_STYLE if theme == "Dark" else LIGHT_STYLE, unsafe_allow_html=True)
 
 # ----------------- Login -----------------
 st.sidebar.title("👤 Login")
@@ -108,7 +124,7 @@ elif page == "🔍 Admin Dashboard":
         users_ref = db.collection("users").stream()
         for user_doc in users_ref:
             uname = user_doc.id
-            st.write(f"🔍 Reading habits for user: {uname}")
+            st.write(f"📦 Fetching data for: {uname}")
             habits = db.collection("users").document(uname).collection("habits").stream()
             for doc in habits:
                 d = doc.to_dict()
@@ -121,7 +137,7 @@ elif page == "🔍 Admin Dashboard":
                         "photo": d.get("photo", "")
                     })
     except Exception as e:
-        st.error(f"🔥 Error fetching data: {e}")
+        st.error(f"❌ Error fetching data: {e}")
 
     if all_data:
         df = pd.DataFrame(all_data)
@@ -130,14 +146,13 @@ elif page == "🔍 Admin Dashboard":
         filtered_df = df if selected_user == "All" else df[df["username"] == selected_user]
         st.dataframe(filtered_df, use_container_width=True)
 
-        if st.button("📥 Export CSV"):
-            st.download_button("Download CSV", data=filtered_df.to_csv(index=False), file_name="all_habits.csv")
-
         st.markdown("### 📸 Uploaded Photos")
         for i, row in filtered_df.iterrows():
             if row["photo"]:
                 with st.expander(f"{row['username']} - {row['timestamp']}"):
                     st.markdown(f"**{row['text']}**")
                     st.image(row["photo"], use_column_width=True)
+
+        st.download_button("📥 Download CSV", data=filtered_df.to_csv(index=False), file_name="all_habits.csv")
     else:
         st.warning("🚫 No habit entries found in Firestore.")
