@@ -1,3 +1,4 @@
+
 import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore, storage
@@ -26,20 +27,14 @@ if not firebase_admin._apps:
 db = firestore.client()
 bucket = storage.bucket()
 
-# ----------------- Dark Mode Toggle -----------------
+# ----------------- Page Theme -----------------
 st.set_page_config(page_title="📸 HabitSnap | Tracker + Admin", layout="wide")
 
 theme = st.sidebar.selectbox("🎨 Select Theme", ["Light", "Dark"])
 if theme == "Dark":
-    st.markdown(
-        "<style>body, .stApp { background-color: #000000; color: white; }</style>",
-        unsafe_allow_html=True
-    )
+    st.markdown("<style>body, .stApp { background-color: #000000; color: white; }</style>", unsafe_allow_html=True)
 else:
-    st.markdown(
-        "<style>body, .stApp { background-color: #ffffff; color: black; }</style>",
-        unsafe_allow_html=True
-    )
+    st.markdown("<style>body, .stApp { background-color: #ffffff; color: black; }</style>", unsafe_allow_html=True)
 
 # ----------------- Login -----------------
 st.sidebar.title("👤 Login")
@@ -53,7 +48,7 @@ if not username:
 st.sidebar.success(f"Logged in as {username}")
 page = "🔍 Admin Dashboard" if is_admin else "📋 HabitSnap Tracker"
 
-# ----------------- Page 1: User Habit Tracker -----------------
+# ----------------- Tracker -----------------
 if page == "📋 HabitSnap Tracker":
     st.title("📋 HabitSnap - Personal Tracker")
 
@@ -87,7 +82,10 @@ if page == "📋 HabitSnap Tracker":
     grouped = {}
     for doc in habits:
         entry = doc.to_dict()
-        dt = entry["timestamp"].astimezone()
+        dt = entry.get("timestamp")
+        if not dt:
+            continue
+        dt = dt.astimezone()
         month_key = dt.strftime("%B %Y")
         grouped.setdefault(month_key, []).append((dt, entry["text"], entry.get("photo"), doc.id))
 
@@ -101,33 +99,35 @@ if page == "📋 HabitSnap Tracker":
                     habits_ref.document(doc_id).delete()
                     st.experimental_rerun()
 
-# ----------------- Page 2: Admin Dashboard -----------------
+# ----------------- Admin Dashboard -----------------
 elif page == "🔍 Admin Dashboard":
     st.title("🔍 Admin Dashboard")
-
-    users_ref = db.collection("users").stream()
     all_data = []
 
-    for user_doc in users_ref:
-        uname = user_doc.id
-        habits = db.collection("users").document(uname).collection("habits").stream()
-        for doc in habits:
-            d = doc.to_dict()
-            all_data.append({
-                "username": uname,
-                "timestamp": d["timestamp"].astimezone().strftime("%Y-%m-%d %H:%M"),
-                "text": d["text"],
-                "photo": d.get("photo", "")
-            })
+    try:
+        users_ref = db.collection("users").stream()
+        for user_doc in users_ref:
+            uname = user_doc.id
+            st.write(f"🔍 Reading habits for user: {uname}")
+            habits = db.collection("users").document(uname).collection("habits").stream()
+            for doc in habits:
+                d = doc.to_dict()
+                ts = d.get("timestamp")
+                if ts:
+                    all_data.append({
+                        "username": uname,
+                        "timestamp": ts.astimezone().strftime("%Y-%m-%d %H:%M"),
+                        "text": d.get("text", ""),
+                        "photo": d.get("photo", "")
+                    })
+    except Exception as e:
+        st.error(f"🔥 Error fetching data: {e}")
 
-    df = pd.DataFrame(all_data)
-    if df.empty:
-        st.warning("No data found.")
-    else:
+    if all_data:
+        df = pd.DataFrame(all_data)
         usernames = df["username"].unique().tolist()
         selected_user = st.selectbox("Filter by user", ["All"] + usernames)
         filtered_df = df if selected_user == "All" else df[df["username"] == selected_user]
-
         st.dataframe(filtered_df, use_container_width=True)
 
         if st.button("📥 Export CSV"):
@@ -139,3 +139,5 @@ elif page == "🔍 Admin Dashboard":
                 with st.expander(f"{row['username']} - {row['timestamp']}"):
                     st.markdown(f"**{row['text']}**")
                     st.image(row["photo"], use_column_width=True)
+    else:
+        st.warning("🚫 No habit entries found in Firestore.")
