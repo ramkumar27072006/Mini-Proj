@@ -1,12 +1,11 @@
-
 import streamlit as st
+from firebase_admin import credentials, firestore, storage, initialize_app
 import firebase_admin
-from firebase_admin import credentials, firestore, storage
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 
-# ----------------- Firebase Init -----------------
+# Firebase Init
 if not firebase_admin._apps:
     cred = credentials.Certificate({
         "type": st.secrets["FIREBASE"]["type"],
@@ -20,107 +19,135 @@ if not firebase_admin._apps:
         "auth_provider_x509_cert_url": st.secrets["FIREBASE"]["auth_provider_x509_cert_url"],
         "client_x509_cert_url": st.secrets["FIREBASE"]["client_x509_cert_url"]
     })
-    firebase_admin.initialize_app(cred, {
+    initialize_app(cred, {
         'storageBucket': st.secrets["FIREBASE"]["storage_bucket"]
     })
 
 db = firestore.client()
 bucket = storage.bucket()
 
-st.set_page_config(page_title="📸 HabitSnap | Admin + User", page_icon="📸", layout="wide")
+# App config
+st.set_page_config(page_title="HabitSnap Pro", layout="wide")
 
-# ----------------- Sidebar Navigation -----------------
-st.sidebar.title("🔀 Navigation")
-page = st.sidebar.radio("Go to", ["📋 HabitSnap Tracker", "🔍 Admin Dashboard"])
+# Theme Switch
+theme = st.sidebar.radio("🌗 Theme", ["🌞 Light", "🌙 Dark"])
+dark = theme == "🌙 Dark"
+st.markdown(f"""
+    <style>
+    body {{
+        background-color: {"#0f2027" if dark else "#ffffff"};
+        color: {"#ffffff" if dark else "#000000"};
+    }}
+    </style>
+""", unsafe_allow_html=True)
 
-# ----------------- Page 1: User Habit Tracker -----------------
-if page == "📋 HabitSnap Tracker":
-    st.title("📋 HabitSnap - Personal Tracker")
+# Google Auth (simplified)
+st.sidebar.title("🔐 Sign In")
+email = st.sidebar.text_input("Your Google Email")
+uid = st.sidebar.text_input("Firebase UID")
+username = email.split('@')[0] if email else "unknown"
 
-    username = st.text_input("👤 Enter your username:")
-    if username:
-        st.success(f"Logged in as `{username}`")
+if not email or not uid:
+    st.warning("Enter authenticated email & UID.")
+    st.stop()
 
-        st.subheader("➕ Add New Habit Entry")
-        with st.form("entry_form", clear_on_submit=True):
-            habit_text = st.text_input("Habit description:")
-            photo_file = st.file_uploader("Photo (optional):", type=["png", "jpg", "jpeg"])
-            submitted = st.form_submit_button("Add Entry")
+is_admin = username == "ramkumar27"
+st.sidebar.success(f"✅ Signed in as {username}")
 
-            if submitted and habit_text:
-                photo_url = None
-                if photo_file:
-                    blob_path = f"users/{username}/{uuid.uuid4()}.jpg"
-                    blob = bucket.blob(blob_path)
-                    blob.upload_from_file(photo_file, content_type=photo_file.type)
-                    blob.make_public()
-                    photo_url = blob.public_url
+# Entry Form
+st.title("📋 HabitSnap - Tracker")
+st.subheader("➕ Add a New Habit")
+with st.form("habit_form", clear_on_submit=True):
+    text = st.text_input("Describe your habit:")
+    photo = st.file_uploader("Optional Photo", type=["jpg", "png", "jpeg"])
+    submitted = st.form_submit_button("Add Entry")
 
-                db.collection("users").document(username).collection("habits").add({
-                    "text": habit_text,
-                    "timestamp": datetime.utcnow(),
-                    "photo": photo_url
-                })
-                st.success("✅ Habit entry added!")
+    if submitted and text:
+        photo_url = None
+        if photo:
+            blob_path = f"users/{username}/{uuid.uuid4()}.jpg"
+            blob = bucket.blob(blob_path)
+            blob.upload_from_file(photo, content_type=photo.type)
+            blob.make_public()
+            photo_url = blob.public_url
+        db.collection("users").document(username).collection("habits").add({
+            "text": text,
+            "timestamp": datetime.utcnow(),
+            "photo": photo_url
+        })
+        st.success("Habit entry added!")
 
-        # View habits
-        st.markdown("---")
-        st.subheader("📅 Your Habit Log")
-        habits_ref = db.collection("users").document(username).collection("habits")
-        habits = habits_ref.order_by("timestamp", direction=firestore.Query.DESCENDING).stream()
+# View Log
+st.markdown("---")
+st.subheader("📅 Your Habit History")
+ref = db.collection("users").document(username).collection("habits")
+docs = list(ref.order_by("timestamp", direction=firestore.Query.DESCENDING).stream())
 
-        grouped = {}
-        for doc in habits:
-            entry = doc.to_dict()
-            dt = entry["timestamp"].astimezone()
-            month_key = dt.strftime("%B %Y")
-            grouped.setdefault(month_key, []).append((dt, entry["text"], entry.get("photo"), doc.id))
+grouped = {}
+dates_logged = set()
 
-        for month, entries in grouped.items():
-            with st.expander(f"📆 {month}", expanded=False):
-                for dt, text, photo, doc_id in entries:
-                    st.markdown(f"**{dt.strftime('%d %b %Y %I:%M %p')}** - {text}")
-                    if photo:
-                        st.image(photo, width=200)
-                    if st.button("Delete", key=doc_id):
-                        habits_ref.document(doc_id).delete()
-                        st.experimental_rerun()
+for doc in docs:
+    data = doc.to_dict()
+    ts = data["timestamp"].astimezone()
+    dates_logged.add(ts.date())
+    month = ts.strftime("%B %Y")
+    grouped.setdefault(month, []).append((ts, data["text"], data.get("photo"), doc.id))
 
-# ----------------- Page 2: Admin Dashboard -----------------
-elif page == "🔍 Admin Dashboard":
+# Streak Calculation
+today = datetime.now().date()
+streak = 0
+for i in range(100):
+    if (today - timedelta(days=i)) in dates_logged:
+        streak += 1
+    else:
+        break
+
+st.info(f"🔥 Current Streak: **{streak}** days")
+st.info(f"📈 Total Entries: **{len(docs)}**")
+if len(docs) >= 10:
+    st.success("🏅 Badge: 10+ Logs!")
+
+for month, entries in grouped.items():
+    with st.expander(f"📆 {month}", expanded=False):
+        for dt, txt, photo, docid in entries:
+            st.markdown(f"🕒 {dt.strftime('%d %b %Y %I:%M %p')} - **{txt}**")
+            if photo:
+                st.image(photo, width=200)
+            if st.button("🗑️ Delete", key=docid):
+                ref.document(docid).delete()
+                st.experimental_rerun()
+
+# Admin Dashboard
+if is_admin:
     st.title("🔍 Admin Dashboard")
-
-    users_ref = db.collection("users").stream()
-    all_data = []
-
-    for user_doc in users_ref:
-        uname = user_doc.id
-        habits = db.collection("users").document(uname).collection("habits").stream()
-        for doc in habits:
-            d = doc.to_dict()
-            all_data.append({
-                "username": uname,
-                "timestamp": d["timestamp"].astimezone().strftime("%Y-%m-%d %H:%M"),
-                "text": d["text"],
-                "photo": d.get("photo", "")
+    all_entries = []
+    users = db.collection("users").stream()
+    for u in users:
+        uref = db.collection("users").document(u.id).collection("habits").stream()
+        for d in uref:
+            data = d.to_dict()
+            all_entries.append({
+                "username": u.id,
+                "timestamp": data["timestamp"].astimezone().strftime("%Y-%m-%d %H:%M"),
+                "text": data["text"],
+                "photo": data.get("photo", "")
             })
 
-    df = pd.DataFrame(all_data)
+    df = pd.DataFrame(all_entries)
     if df.empty:
         st.warning("No data found.")
     else:
-        usernames = df["username"].unique().tolist()
-        selected_user = st.selectbox("Filter by user", ["All"] + usernames)
-        filtered_df = df if selected_user == "All" else df[df["username"] == selected_user]
+        user_filter = st.selectbox("👤 Filter by user", ["All"] + df["username"].unique().tolist())
+        if user_filter != "All":
+            df = df[df["username"] == user_filter]
+        st.dataframe(df, use_container_width=True)
 
-        st.dataframe(filtered_df, use_container_width=True)
+        if st.button("📥 Export All"):
+            st.download_button("Download CSV", df.to_csv(index=False), file_name="all_logs.csv")
 
-        if st.button("📥 Export CSV"):
-            st.download_button("Download CSV", data=filtered_df.to_csv(index=False), file_name="all_habits.csv")
-
-        st.markdown("### 📸 Uploaded Photos")
-        for i, row in filtered_df.iterrows():
+        st.markdown("🖼️ Image Gallery")
+        for _, row in df.iterrows():
             if row["photo"]:
                 with st.expander(f"{row['username']} - {row['timestamp']}"):
-                    st.markdown(f"**{row['text']}**")
+                    st.markdown(f"📝 {row['text']}")
                     st.image(row["photo"], use_column_width=True)
